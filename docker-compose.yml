@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  podcast-feed:
+    build: .
+    container_name: podcast-feed
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      # Mount your podcast files directory
+      - ./podcast-files:/input:ro
+      # Mount the output directory for generated files
+      - ./public:/output
+    environment:
+      # Podcast metadata (customize these)
+      - PODCAST_TITLE=My Awesome Podcast
+      - PODCAST_DESCRIPTION=Weekly episodes about interesting topics
+      - PODCAST_AUTHOR=Your Name
+      - PODCAST_LANGUAGE=en-us
+      - PODCAST_EXPLICIT=no
+      # Optional: URL to podcast cover art image
+      # - PODCAST_IMAGE_URL=https://example.com/podcast-cover.jpg
+
+      # Base URL where the podcast will be hosted
+      # Change this to your actual domain/IP
+      - BASE_URL=http://localhost
+
+      # Optional: Auto-regenerate feed every X seconds (0 = run once on startup)
+      # Useful if you're adding new episodes while the container is running
+      - REGEN_INTERVAL=300  # 5 minutes
+
+    # Optional: Add logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

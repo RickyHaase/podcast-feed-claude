@@ -1,0 +1,19 @@
+:80 {
+    root * /output
+    file_server
+
+    # Enable logging
+    log {
+        output stdout
+        format console
+    }
+
+    # Add CORS headers for podcast players
+    header Access-Control-Allow-Origin *
+    header Access-Control-Allow-Methods "GET, OPTIONS"
+    header Access-Control-Allow-Headers "Content-Type"
+
+    # Proper MIME types for podcast files
+    header /feed.xml Content-Type "application/rss+xml; charset=utf-8"
+    header /episodes/*.mp3 Content-Type "audio/mpeg"
+}
