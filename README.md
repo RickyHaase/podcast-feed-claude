@@ -19,47 +19,69 @@ Create a directory for your podcast files with this structure:
 
 ```
 podcast-files/
-├── episode-001/
-│   ├── episode.mp3
-│   └── episode.json
-├── episode-002/
-│   ├── episode.mp3
-│   └── episode.json
+├── T3 Playlist/
+│   ├── 2025-09-26_Episode Title/
+│   │   ├── 2025-09-26.mp3
+│   │   ├── 2025-09-26.info.json
+│   │   └── 2025-09-26-thumb.jpg
+│   ├── 2025-09-27_Another Episode/
+│   │   ├── 2025-09-27.mp3
+│   │   ├── 2025-09-27.info.json
+│   │   └── 2025-09-27-thumb.jpg
 └── ...
 ```
 
 Each episode folder should contain:
-- One `.mp3` file (your podcast episode)
-- One `.json` file (episode metadata)
+- One `.mp3` file (your podcast episode) - named with date: `YYYY-MM-DD.mp3`
+- One `.info.json` file (YouTube-style metadata) - named: `YYYY-MM-DD.info.json`
+- One thumbnail file (optional) - named: `YYYY-MM-DD-thumb.jpg`
 
-### 2. Create Episode Metadata
+### 2. Episode Metadata Format
 
-Each episode needs a JSON file with metadata. See `examples/episode-001/episode.json` for a template.
+This generator is designed to work with YouTube-downloaded podcast episodes (using yt-dlp or similar tools). The `.info.json` files follow the YouTube metadata format.
 
-Required and optional fields:
+**Key fields used from the JSON:**
+- `title`: Episode title
+- `description`: Episode description (will include timestamps and source link in feed)
+- `upload_date`: Publication date in YYYYMMDD format (e.g., "20250926")
+- `duration`: Episode duration in seconds (automatically converted to HH:MM:SS)
+- `webpage_url`: Original YouTube URL (added to episode descriptions)
+- `chapters`: Array of chapter objects with `start_time` and `title` (formatted as timestamps in show notes)
+- `uploader` or `channel`: Episode author/channel name
+- `id`: YouTube video ID (used for GUID)
+- `thumbnail`: Episode thumbnail URL
 
+**Example snippet from info.json:**
 ```json
 {
+  "id": "6HTU2DrROyg",
   "title": "Episode Title",
-  "description": "Episode description. Can be longer and more detailed.",
-  "pub_date": "2024-01-15T12:00:00Z",
-  "duration": "00:45:30",
-  "author": "Author Name",
-  "episode_number": 1,
-  "explicit": "no",
-  "guid": "unique-episode-identifier"
+  "description": "Episode description with show notes...",
+  "upload_date": "20250926",
+  "duration": 2109,
+  "webpage_url": "https://www.youtube.com/watch?v=6HTU2DrROyg",
+  "uploader": "Channel Name",
+  "chapters": [
+    {
+      "start_time": 0.0,
+      "title": "Intro",
+      "end_time": 21.0
+    },
+    {
+      "start_time": 21.0,
+      "title": "Topic 1",
+      "end_time": 69.0
+    }
+  ]
 }
 ```
 
-**Field descriptions:**
-- `title` (required): Episode title
-- `description` (required): Episode description
-- `pub_date` (required): Publication date in ISO 8601 format
-- `duration` (optional): Episode duration in HH:MM:SS format
-- `author` (optional): Episode author (overrides podcast-level author)
-- `episode_number` (optional): Episode number for iTunes
-- `explicit` (optional): "yes" or "no" for explicit content warning
-- `guid` (optional): Unique identifier (auto-generated if not provided)
+The generator will automatically:
+- Convert upload_date to proper RSS date format
+- Convert duration from seconds to HH:MM:SS
+- Format chapters as timestamps in the description
+- Add the original YouTube link to show notes
+- Generate unique GUIDs from video IDs
 
 ### 3. Run with Docker Compose
 

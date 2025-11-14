@@ -23,10 +23,74 @@ def get_file_hash(filepath):
     return hash_md5.hexdigest()
 
 
+def seconds_to_duration(seconds):
+    """Convert seconds to HH:MM:SS format."""
+    if not seconds:
+        return "00:00:00"
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def format_chapters_as_text(chapters):
+    """Format chapters array into readable timestamp text."""
+    if not chapters:
+        return ""
+
+    lines = []
+    for chapter in chapters:
+        start = int(chapter.get('start_time', 0))
+        hours = start // 3600
+        minutes = (start % 3600) // 60
+        secs = start % 60
+
+        if hours > 0:
+            timestamp = f"{hours:02d}:{minutes:02d}:{secs:02d}"
+        else:
+            timestamp = f"{minutes:02d}:{secs:02d}"
+
+        title = chapter.get('title', '')
+        lines.append(f"{timestamp} {title}")
+
+    return "\n".join(lines)
+
+
 def parse_episode_metadata(json_path):
-    """Parse episode metadata from JSON file."""
+    """Parse episode metadata from JSON file (YouTube format)."""
     with open(json_path, 'r') as f:
-        return json.load(f)
+        data = json.load(f)
+
+    # Convert YouTube JSON format to our internal format
+    metadata = {
+        'title': data.get('title', ''),
+        'description': data.get('description', ''),
+        'webpage_url': data.get('webpage_url', ''),
+        'chapters': data.get('chapters', []),
+    }
+
+    # Convert upload_date (YYYYMMDD) to ISO 8601 format
+    if 'upload_date' in data:
+        try:
+            date_str = data['upload_date']
+            dt = datetime.strptime(date_str, '%Y%m%d')
+            metadata['pub_date'] = dt.isoformat() + 'Z'
+        except:
+            pass
+
+    # Convert duration from seconds to HH:MM:SS
+    if 'duration' in data:
+        metadata['duration'] = seconds_to_duration(data['duration'])
+
+    # Extract other useful fields
+    metadata['author'] = data.get('uploader', data.get('channel', ''))
+    metadata['thumbnail'] = data.get('thumbnail', '')
+
+    # Generate a unique GUID from the video ID
+    if 'id' in data:
+        metadata['guid'] = f"youtube-{data['id']}"
+
+    return metadata
 
 
 def get_mp3_size(mp3_path):
@@ -36,7 +100,8 @@ def get_mp3_size(mp3_path):
 
 def find_episodes(input_dir):
     """
-    Scan input directory for episode folders containing .mp3 and .json files.
+    Scan input directory for episode folders containing .mp3 and .info.json files.
+    Expects files named like: YYYY-MM-DD.mp3, YYYY-MM-DD.info.json, YYYY-MM-DD-thumb.jpg
     Returns list of episode data dictionaries.
     """
     episodes = []
@@ -46,32 +111,47 @@ def find_episodes(input_dir):
         print(f"Input directory {input_dir} does not exist")
         return episodes
 
-    # Look for folders containing both .mp3 and .json files
+    # Look for folders containing both .mp3 and .info.json files
     for folder in sorted(input_path.iterdir()):
         if not folder.is_dir():
             continue
 
-        mp3_files = list(folder.glob("*.mp3"))
-        json_files = list(folder.glob("*.json"))
+        # Look for .info.json files (YouTube format)
+        info_json_files = list(folder.glob("*.info.json"))
 
-        if mp3_files and json_files:
-            # Take first mp3 and json found in folder
-            mp3_file = mp3_files[0]
-            json_file = json_files[0]
+        if info_json_files:
+            # Process each info.json file
+            for json_file in info_json_files:
+                # Extract the base date from the filename (e.g., "2025-09-26" from "2025-09-26.info.json")
+                base_name = json_file.stem.replace('.info', '')
 
-            try:
-                metadata = parse_episode_metadata(json_file)
-                episode = {
-                    'folder_name': folder.name,
-                    'mp3_path': mp3_file,
-                    'mp3_filename': mp3_file.name,
-                    'mp3_size': get_mp3_size(mp3_file),
-                    'metadata': metadata
-                }
-                episodes.append(episode)
-                print(f"Found episode: {metadata.get('title', folder.name)}")
-            except Exception as e:
-                print(f"Error processing {folder.name}: {e}")
+                # Look for corresponding MP3 file
+                mp3_file = folder / f"{base_name}.mp3"
+
+                # Look for thumbnail
+                thumb_file = folder / f"{base_name}-thumb.jpg"
+
+                if mp3_file.exists():
+                    try:
+                        metadata = parse_episode_metadata(json_file)
+
+                        # Add thumbnail path if it exists
+                        if thumb_file.exists():
+                            metadata['thumbnail_file'] = thumb_file
+
+                        episode = {
+                            'folder_name': folder.name,
+                            'mp3_path': mp3_file,
+                            'mp3_filename': mp3_file.name,
+                            'mp3_size': get_mp3_size(mp3_file),
+                            'metadata': metadata
+                        }
+                        episodes.append(episode)
+                        print(f"Found episode: {metadata.get('title', folder.name)}")
+                    except Exception as e:
+                        print(f"Error processing {json_file.name}: {e}")
+                        import traceback
+                        traceback.print_exc()
 
     return episodes
 
@@ -122,11 +202,26 @@ def generate_rss_feed(episodes, podcast_info, base_url):
         meta = episode['metadata']
 
         SubElement(item, 'title').text = meta.get('title', episode['folder_name'])
-        SubElement(item, 'description').text = meta.get('description', '')
+
+        # Build description with chapters and source link
+        description = meta.get('description', '')
+
+        # Add chapters/timestamps if available
+        chapters = meta.get('chapters', [])
+        if chapters:
+            chapters_text = format_chapters_as_text(chapters)
+            if chapters_text:
+                description += f"\n\nTimestamps:\n{chapters_text}"
+
+        # Add source link if available
+        if meta.get('webpage_url'):
+            description += f"\n\nOriginal source: {meta['webpage_url']}"
+
+        SubElement(item, 'description').text = description
 
         # Episode URL
         episode_url = f"{base_url}/episodes/{episode['mp3_filename']}"
-        SubElement(item, 'link').text = episode_url
+        SubElement(item, 'link').text = meta.get('webpage_url', episode_url)
 
         # Enclosure (the actual MP3 file)
         enclosure = SubElement(item, 'enclosure')
@@ -184,6 +279,52 @@ def generate_html_page(episodes, podcast_info):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{podcast_info.get('title', 'My Podcast')}</title>
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }}
+        .episode {{
+            margin-bottom: 40px;
+            padding-bottom: 40px;
+            border-bottom: 1px solid #ccc;
+        }}
+        .episode:last-child {{
+            border-bottom: none;
+        }}
+        .episode h3 {{
+            margin-top: 0;
+        }}
+        .description {{
+            white-space: pre-wrap;
+            margin: 15px 0;
+        }}
+        .chapters {{
+            background-color: #f5f5f5;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+        }}
+        .chapters h4 {{
+            margin-top: 0;
+        }}
+        .chapters-list {{
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 0.9em;
+        }}
+        .metadata {{
+            color: #666;
+            font-size: 0.9em;
+        }}
+        audio {{
+            width: 100%;
+            margin: 15px 0;
+        }}
+    </style>
 </head>
 <body>
     <h1>{podcast_info.get('title', 'My Podcast')}</h1>
@@ -193,7 +334,6 @@ def generate_html_page(episodes, podcast_info):
     <p>RSS Feed: <a href="/feed.xml">/feed.xml</a></p>
 
     <h2>Episodes</h2>
-    <ul>
 """
 
     for episode in sorted_episodes:
@@ -201,20 +341,46 @@ def generate_html_page(episodes, podcast_info):
         title = meta.get('title', episode['folder_name'])
         description = meta.get('description', '')
         pub_date = meta.get('pub_date', '')
+        webpage_url = meta.get('webpage_url', '')
+        chapters = meta.get('chapters', [])
 
-        html += f"""        <li>
-            <h3>{title}</h3>
-            <p><strong>Published:</strong> {pub_date}</p>
-            <p>{description}</p>
-            <audio controls>
-                <source src="/episodes/{episode['mp3_filename']}" type="audio/mpeg">
-                Your browser does not support the audio element.
-            </audio>
-        </li>
+        html += f"""    <div class="episode">
+        <h3>{title}</h3>
+        <div class="metadata">
+            <strong>Published:</strong> {pub_date}
 """
 
-    html += """    </ul>
-</body>
+        if webpage_url:
+            html += f"""            | <strong>Source:</strong> <a href="{webpage_url}" target="_blank">View Original</a>
+"""
+
+        html += """        </div>
+
+        <audio controls>
+            <source src="/episodes/{}" type="audio/mpeg">
+            Your browser does not support the audio element.
+        </audio>
+""".format(episode['mp3_filename'])
+
+        if description:
+            html += f"""
+        <div class="description">{description}</div>
+"""
+
+        if chapters:
+            chapters_text = format_chapters_as_text(chapters)
+            if chapters_text:
+                html += f"""
+        <div class="chapters">
+            <h4>Timestamps</h4>
+            <div class="chapters-list">{chapters_text}</div>
+        </div>
+"""
+
+        html += """    </div>
+"""
+
+    html += """</body>
 </html>
 """
 
@@ -262,13 +428,22 @@ def main():
     episodes_dir = output_path / 'episodes'
     episodes_dir.mkdir(exist_ok=True)
 
-    # Copy MP3 files to output directory
+    # Copy MP3 files and thumbnails to output directory
     print("Copying MP3 files...")
     for episode in episodes:
+        # Copy MP3
         dest = episodes_dir / episode['mp3_filename']
         if not dest.exists() or get_file_hash(episode['mp3_path']) != get_file_hash(dest):
             shutil.copy2(episode['mp3_path'], dest)
             print(f"  Copied {episode['mp3_filename']}")
+
+        # Copy thumbnail if it exists
+        if 'thumbnail_file' in episode['metadata']:
+            thumb_src = episode['metadata']['thumbnail_file']
+            thumb_dest = episodes_dir / thumb_src.name
+            if not thumb_dest.exists() or get_file_hash(thumb_src) != get_file_hash(thumb_dest):
+                shutil.copy2(thumb_src, thumb_dest)
+                print(f"  Copied {thumb_src.name}")
 
     # Generate RSS feed
     print("Generating RSS feed...")
