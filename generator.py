@@ -13,6 +13,14 @@ from xml.etree.ElementTree import Element, SubElement, ElementTree
 from xml.dom import minidom
 import hashlib
 
+# Import Whisper for transcription (will be None if not available)
+try:
+    import whisper
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WHISPER_AVAILABLE = False
+    print("Warning: Whisper not available. Transcription will be disabled.")
+
 
 def get_file_hash(filepath):
     """Generate MD5 hash of file for change detection."""
@@ -98,10 +106,51 @@ def get_mp3_size(mp3_path):
     return os.path.getsize(mp3_path)
 
 
+def transcribe_audio(audio_path, transcript_path=None, model_name="base"):
+    """
+    Transcribe audio file using Whisper.
+
+    Args:
+        audio_path: Path to the audio file (MP3, WAV, etc.)
+        transcript_path: Optional path to save transcript to. If None, returns transcript text only.
+        model_name: Whisper model to use (tiny, base, small, medium, large)
+
+    Returns:
+        Transcript text string
+    """
+    if not WHISPER_AVAILABLE:
+        print(f"  Skipping transcription for {audio_path.name} (Whisper not available)")
+        return None
+
+    try:
+        print(f"  Loading Whisper model '{model_name}'...")
+        model = whisper.load_model(model_name)
+
+        print(f"  Transcribing {audio_path.name}...")
+        result = model.transcribe(str(audio_path))
+
+        transcript_text = result["text"].strip()
+
+        # Save to file if path provided
+        if transcript_path:
+            with open(transcript_path, 'w', encoding='utf-8') as f:
+                f.write(transcript_text)
+            print(f"  Transcript saved to {transcript_path.name}")
+
+        return transcript_text
+
+    except Exception as e:
+        print(f"  Error transcribing {audio_path.name}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 def find_episodes(input_dir):
     """
     Scan input directory for episode folders containing .mp3 and .info.json files.
     Expects files named like: YYYY-MM-DD.mp3, YYYY-MM-DD.info.json, YYYY-MM-DD-thumb.jpg
+    Optionally generates or loads transcripts using Whisper.
     Returns list of episode data dictionaries.
     """
     episodes = []
@@ -110,6 +159,10 @@ def find_episodes(input_dir):
     if not input_path.exists():
         print(f"Input directory {input_dir} does not exist")
         return episodes
+
+    # Get transcription settings from environment
+    enable_transcription = os.getenv('ENABLE_TRANSCRIPTION', 'true').lower() == 'true'
+    whisper_model = os.getenv('WHISPER_MODEL', 'base')  # tiny, base, small, medium, large
 
     # Look for folders containing both .mp3 and .info.json files
     for folder in sorted(input_path.iterdir()):
@@ -131,6 +184,9 @@ def find_episodes(input_dir):
                 # Look for thumbnail
                 thumb_file = folder / f"{base_name}-thumb.jpg"
 
+                # Look for transcript file
+                transcript_file = folder / f"{base_name}.txt"
+
                 if mp3_file.exists():
                     try:
                         metadata = parse_episode_metadata(json_file)
@@ -138,6 +194,22 @@ def find_episodes(input_dir):
                         # Add thumbnail path if it exists
                         if thumb_file.exists():
                             metadata['thumbnail_file'] = thumb_file
+
+                        # Handle transcription
+                        transcript_text = None
+                        if transcript_file.exists():
+                            # Load existing transcript
+                            print(f"  Loading existing transcript from {transcript_file.name}")
+                            with open(transcript_file, 'r', encoding='utf-8') as f:
+                                transcript_text = f.read().strip()
+                        elif enable_transcription and WHISPER_AVAILABLE:
+                            # Generate new transcript
+                            print(f"  Generating transcript for {mp3_file.name}...")
+                            transcript_text = transcribe_audio(mp3_file, transcript_file, whisper_model)
+
+                        # Add transcript to metadata
+                        if transcript_text:
+                            metadata['transcript'] = transcript_text
 
                         episode = {
                             'folder_name': folder.name,
@@ -203,8 +275,12 @@ def generate_rss_feed(episodes, podcast_info, base_url):
 
         SubElement(item, 'title').text = meta.get('title', episode['folder_name'])
 
-        # Build description with chapters and source link
+        # Build description with chapters, transcript, and source link
         description = meta.get('description', '')
+
+        # Add transcript if available
+        if meta.get('transcript'):
+            description += f"\n\nTranscript:\n{meta['transcript']}"
 
         # Add chapters/timestamps if available
         chapters = meta.get('chapters', [])
@@ -302,6 +378,22 @@ def generate_html_page(episodes, podcast_info):
             white-space: pre-wrap;
             margin: 15px 0;
         }}
+        .transcript {{
+            background-color: #e8f4f8;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            border-left: 4px solid #0066cc;
+        }}
+        .transcript h4 {{
+            margin-top: 0;
+            color: #0066cc;
+        }}
+        .transcript-text {{
+            white-space: pre-wrap;
+            line-height: 1.8;
+            font-size: 0.95em;
+        }}
         .chapters {{
             background-color: #f5f5f5;
             padding: 15px;
@@ -343,6 +435,7 @@ def generate_html_page(episodes, podcast_info):
         pub_date = meta.get('pub_date', '')
         webpage_url = meta.get('webpage_url', '')
         chapters = meta.get('chapters', [])
+        transcript = meta.get('transcript', '')
 
         html += f"""    <div class="episode">
         <h3>{title}</h3>
@@ -365,6 +458,14 @@ def generate_html_page(episodes, podcast_info):
         if description:
             html += f"""
         <div class="description">{description}</div>
+"""
+
+        if transcript:
+            html += f"""
+        <div class="transcript">
+            <h4>Transcript</h4>
+            <div class="transcript-text">{transcript}</div>
+        </div>
 """
 
         if chapters:

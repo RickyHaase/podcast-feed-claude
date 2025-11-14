@@ -5,6 +5,7 @@ A self-contained Docker solution for generating podcast RSS feeds and a simple s
 ## Features
 
 - Automatically generates RSS 2.0 podcast feed from MP3 files
+- **Automatic transcription using OpenAI Whisper**
 - Creates a simple HTML page for browsing episodes
 - Serves everything with Caddy web server
 - Self-contained Docker container
@@ -35,6 +36,7 @@ Each episode folder should contain:
 - One `.mp3` file (your podcast episode) - named with date: `YYYY-MM-DD.mp3`
 - One `.info.json` file (YouTube-style metadata) - named: `YYYY-MM-DD.info.json`
 - One thumbnail file (optional) - named: `YYYY-MM-DD-thumb.jpg`
+- One transcript file (optional) - named: `YYYY-MM-DD.txt` (auto-generated if not present)
 
 ### 2. Episode Metadata Format
 
@@ -135,6 +137,15 @@ Configure your podcast using environment variables:
 - `OUTPUT_DIR`: Output directory path (default: "/output")
 - `REGEN_INTERVAL`: Auto-regenerate interval in seconds (default: 0 = run once)
 
+**Transcription Configuration:**
+- `ENABLE_TRANSCRIPTION`: Enable automatic transcription (default: "true")
+- `WHISPER_MODEL`: Whisper model to use - "tiny", "base", "small", "medium", "large" (default: "base")
+  - **tiny**: Fastest, lower quality (~1GB RAM, ~32x realtime)
+  - **base**: Balanced speed and quality (~1GB RAM, ~16x realtime) - **recommended**
+  - **small**: Better quality (~2GB RAM, ~6x realtime)
+  - **medium**: High quality (~5GB RAM, ~2x realtime)
+  - **large**: Best quality (~10GB RAM, ~1x realtime)
+
 ### Alternative: podcast_info.json
 
 Instead of environment variables, you can place a `podcast_info.json` file in your input directory:
@@ -179,6 +190,73 @@ environment:
 ```
 
 Set to `0` (default) to only generate on container startup.
+
+## Transcription
+
+The podcast feed generator includes automatic transcription using OpenAI's Whisper model.
+
+### How It Works
+
+1. **Automatic Transcription**: When processing episodes, the generator checks for existing transcript files (`.txt`)
+2. **Cache System**: If a transcript exists, it's loaded from the file. Otherwise, Whisper transcribes the audio
+3. **Storage**: Transcripts are saved as `.txt` files alongside your MP3s for reuse
+4. **Integration**: Transcripts appear in both the RSS feed description and HTML page
+
+### Transcription Workflow
+
+```
+Episode Processing
+├─ Check for YYYY-MM-DD.txt
+├─ If exists: Load existing transcript
+├─ If not exists and ENABLE_TRANSCRIPTION=true:
+│   ├─ Load Whisper model
+│   ├─ Transcribe audio
+│   └─ Save to YYYY-MM-DD.txt
+└─ Add transcript to RSS feed and HTML
+```
+
+### Configuring Transcription
+
+**Enable/Disable:**
+```yaml
+environment:
+  - ENABLE_TRANSCRIPTION=true  # Enable (default)
+  # or
+  - ENABLE_TRANSCRIPTION=false  # Disable
+```
+
+**Choose Model:**
+```yaml
+environment:
+  - WHISPER_MODEL=base  # Recommended for most use cases
+  # Options: tiny, base, small, medium, large
+```
+
+**Model Selection Guide:**
+- Use **tiny** for quick testing or low-resource environments
+- Use **base** (default) for good balance of speed and quality
+- Use **small** or **medium** for better accuracy with longer processing time
+- Use **large** only if you need maximum accuracy and have powerful hardware
+
+### Performance Notes
+
+- First transcription downloads the Whisper model (~140MB for base model)
+- Processing time varies by model and episode length
+- Transcripts are cached, so subsequent runs are instant
+- Transcription happens during feed generation, not while serving
+
+### Manual Transcripts
+
+You can provide your own transcripts by creating `.txt` files:
+
+```
+2025-09-26/
+├── 2025-09-26.mp3
+├── 2025-09-26.info.json
+└── 2025-09-26.txt  ← Your custom transcript
+```
+
+If a `.txt` file exists, Whisper transcription is skipped for that episode.
 
 ## Publishing Your Podcast
 

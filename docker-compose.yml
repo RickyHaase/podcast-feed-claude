@@ -30,6 +30,10 @@ services:
       # Useful if you're adding new episodes while the container is running
       - REGEN_INTERVAL=300  # 5 minutes
 
+      # Transcription settings
+      - ENABLE_TRANSCRIPTION=true  # Enable automatic transcription
+      - WHISPER_MODEL=base  # Options: tiny, base, small, medium, large
+
     # Optional: Add logging
     logging:
       driver: "json-file"
