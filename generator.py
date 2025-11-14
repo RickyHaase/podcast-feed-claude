@@ -106,7 +106,7 @@ def get_mp3_size(mp3_path):
     return os.path.getsize(mp3_path)
 
 
-def transcribe_audio(audio_path, transcript_path=None, model_name="base"):
+def transcribe_audio(audio_path, transcript_path=None, model_name="base", initial_prompt=""):
     """
     Transcribe audio file using Whisper.
 
@@ -114,6 +114,7 @@ def transcribe_audio(audio_path, transcript_path=None, model_name="base"):
         audio_path: Path to the audio file (MP3, WAV, etc.)
         transcript_path: Optional path to save transcript to. If None, returns transcript text only.
         model_name: Whisper model to use (tiny, base, small, medium, large)
+        initial_prompt: Optional text to guide the model (speaker names, technical terms, etc.)
 
     Returns:
         Transcript text string
@@ -127,7 +128,14 @@ def transcribe_audio(audio_path, transcript_path=None, model_name="base"):
         model = whisper.load_model(model_name)
 
         print(f"  Transcribing {audio_path.name}...")
-        result = model.transcribe(str(audio_path))
+
+        # Build transcribe options
+        transcribe_options = {}
+        if initial_prompt:
+            transcribe_options['initial_prompt'] = initial_prompt
+            print(f"  Using custom prompt: {initial_prompt[:50]}...")
+
+        result = model.transcribe(str(audio_path), **transcribe_options)
 
         transcript_text = result["text"].strip()
 
@@ -161,8 +169,9 @@ def find_episodes(input_dir):
         return episodes
 
     # Get transcription settings from environment
-    enable_transcription = os.getenv('ENABLE_TRANSCRIPTION', 'true').lower() == 'true'
+    enable_transcription = os.getenv('ENABLE_TRANSCRIPTION', 'false').lower() == 'true'
     whisper_model = os.getenv('WHISPER_MODEL', 'base')  # tiny, base, small, medium, large
+    whisper_prompt = os.getenv('WHISPER_PROMPT', '')  # Optional initial prompt for context
 
     # Look for folders containing both .mp3 and .info.json files
     for folder in sorted(input_path.iterdir()):
@@ -205,7 +214,7 @@ def find_episodes(input_dir):
                         elif enable_transcription and WHISPER_AVAILABLE:
                             # Generate new transcript
                             print(f"  Generating transcript for {mp3_file.name}...")
-                            transcript_text = transcribe_audio(mp3_file, transcript_file, whisper_model)
+                            transcript_text = transcribe_audio(mp3_file, transcript_file, whisper_model, whisper_prompt)
 
                         # Add transcript to metadata
                         if transcript_text:

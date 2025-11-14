@@ -30,9 +30,11 @@ services:
       # Useful if you're adding new episodes while the container is running
       - REGEN_INTERVAL=300  # 5 minutes
 
-      # Transcription settings
-      - ENABLE_TRANSCRIPTION=true  # Enable automatic transcription
+      # Transcription settings (disabled by default - enable to use)
+      - ENABLE_TRANSCRIPTION=false  # Set to 'true' to enable automatic transcription
       - WHISPER_MODEL=base  # Options: tiny, base, small, medium, large
+      # Optional: Custom prompt to guide transcription (speaker names, technical terms, etc.)
+      # - WHISPER_PROMPT=This podcast features John and Sarah discussing technology topics like Kubernetes, Docker, and API development.
 
     # Optional: Add logging
     logging:

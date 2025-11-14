@@ -138,13 +138,14 @@ Configure your podcast using environment variables:
 - `REGEN_INTERVAL`: Auto-regenerate interval in seconds (default: 0 = run once)
 
 **Transcription Configuration:**
-- `ENABLE_TRANSCRIPTION`: Enable automatic transcription (default: "true")
+- `ENABLE_TRANSCRIPTION`: Enable automatic transcription (default: "false" - must be enabled explicitly)
 - `WHISPER_MODEL`: Whisper model to use - "tiny", "base", "small", "medium", "large" (default: "base")
   - **tiny**: Fastest, lower quality (~1GB RAM, ~32x realtime)
   - **base**: Balanced speed and quality (~1GB RAM, ~16x realtime) - **recommended**
   - **small**: Better quality (~2GB RAM, ~6x realtime)
   - **medium**: High quality (~5GB RAM, ~2x realtime)
   - **large**: Best quality (~10GB RAM, ~1x realtime)
+- `WHISPER_PROMPT`: Optional custom prompt to guide transcription with context (speaker names, technical terms, etc.)
 
 ### Alternative: podcast_info.json
 
@@ -220,9 +221,8 @@ Episode Processing
 **Enable/Disable:**
 ```yaml
 environment:
-  - ENABLE_TRANSCRIPTION=true  # Enable (default)
-  # or
-  - ENABLE_TRANSCRIPTION=false  # Disable
+  - ENABLE_TRANSCRIPTION=true  # Enable transcription
+  # Transcription is disabled by default to save resources
 ```
 
 **Choose Model:**
@@ -231,6 +231,23 @@ environment:
   - WHISPER_MODEL=base  # Recommended for most use cases
   # Options: tiny, base, small, medium, large
 ```
+
+**Custom Prompt (Improve Accuracy):**
+```yaml
+environment:
+  - WHISPER_PROMPT=This podcast features John and Sarah discussing technology topics like Kubernetes, Docker, and API development.
+```
+
+The custom prompt helps Whisper:
+- Correctly spell technical terms, product names, and jargon
+- Identify speaker names and context
+- Maintain consistency with your podcast's terminology
+- Improve accuracy for domain-specific content
+
+**Example prompts:**
+- `"Hosts: Dr. Jane Smith and Mike Chen. Topics: machine learning, neural networks, TensorFlow, PyTorch."`
+- `"Medical podcast discussing cardiology, oncology, pharmaceuticals."`
+- `"True crime podcast about the FBI, forensics, and criminal investigations."`
 
 **Model Selection Guide:**
 - Use **tiny** for quick testing or low-resource environments
@@ -244,6 +261,47 @@ environment:
 - Processing time varies by model and episode length
 - Transcripts are cached, so subsequent runs are instant
 - Transcription happens during feed generation, not while serving
+- **CPU vs GPU**: By default, Whisper runs on CPU which is sufficient for most use cases
+
+### GPU Acceleration (Optional)
+
+Whisper can use GPU acceleration for significantly faster transcription:
+
+**Do you need GPU?**
+- **No, if**: You're transcribing occasionally or have time to wait (CPU works fine)
+- **Yes, if**: You're batch-processing many episodes or need faster turnaround
+
+**CPU Performance** (approximate for 1-hour episode):
+- tiny: ~2 minutes
+- base: ~4 minutes
+- small: ~10 minutes
+- medium: ~30 minutes
+- large: ~60 minutes
+
+**GPU Performance** (with NVIDIA GPU):
+- All models: 2-5x faster than CPU
+
+**To enable GPU support:**
+
+1. Ensure you have NVIDIA GPU and nvidia-docker installed on host
+2. Update `docker-compose.yml`:
+
+```yaml
+services:
+  podcast-feed:
+    # ... existing config ...
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+```
+
+3. The container will automatically use GPU if available
+
+**Note**: The current Docker image uses CPU-only PyTorch from Alpine packages. For GPU support, you would need to modify the Dockerfile to install CUDA-enabled PyTorch, which significantly increases image size (~4GB vs ~500MB).
 
 ### Manual Transcripts
 
