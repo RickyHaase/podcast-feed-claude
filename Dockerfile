@@ -8,7 +8,9 @@ RUN apk add --no-cache \
     py3-numpy \
     py3-torch \
     py3-torch-vision \
-    && pip3 install --no-cache-dir --break-system-packages openai-whisper
+    && pip3 install --no-cache-dir --break-system-packages \
+       openai-whisper \
+       whisperx
 
 # Create working directory
 WORKDIR /app

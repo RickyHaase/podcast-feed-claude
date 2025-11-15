@@ -6,6 +6,7 @@ A self-contained Docker solution for generating podcast RSS feeds and a simple s
 
 - Automatically generates RSS 2.0 podcast feed from MP3 files
 - **Automatic transcription using OpenAI Whisper**
+- **Speaker diarization (identification) using WhisperX**
 - Creates a simple HTML page for browsing episodes
 - Serves everything with Caddy web server
 - Self-contained Docker container
@@ -36,7 +37,8 @@ Each episode folder should contain:
 - One `.mp3` file (your podcast episode) - named with date: `YYYY-MM-DD.mp3`
 - One `.info.json` file (YouTube-style metadata) - named: `YYYY-MM-DD.info.json`
 - One thumbnail file (optional) - named: `YYYY-MM-DD-thumb.jpg`
-- One transcript file (optional) - named: `YYYY-MM-DD.txt` (auto-generated if not present)
+- One transcript file (optional) - named: `YYYY-MM-DD.txt` (auto-generated if transcription enabled)
+- One JSON transcript (optional) - named: `YYYY-MM-DD.transcript.json` (auto-generated with speaker diarization)
 
 ### 2. Episode Metadata Format
 
@@ -146,6 +148,12 @@ Configure your podcast using environment variables:
   - **medium**: High quality (~5GB RAM, ~2x realtime)
   - **large**: Best quality (~10GB RAM, ~1x realtime)
 - `WHISPER_PROMPT`: Optional custom prompt to guide transcription with context (speaker names, technical terms, etc.)
+
+**Speaker Diarization Configuration:**
+- `ENABLE_SPEAKER_DIARIZATION`: Enable speaker identification (default: "false")
+- `HUGGINGFACE_TOKEN`: Required HuggingFace token for speaker diarization models ([Get free token here](https://huggingface.co/settings/tokens))
+- `MIN_SPEAKERS`: Minimum expected number of speakers (optional, e.g., "2")
+- `MAX_SPEAKERS`: Maximum expected number of speakers (optional, e.g., "4")
 
 ### Alternative: podcast_info.json
 
@@ -315,6 +323,129 @@ You can provide your own transcripts by creating `.txt` files:
 ```
 
 If a `.txt` file exists, Whisper transcription is skipped for that episode.
+
+## Speaker Diarization
+
+Speaker diarization identifies "who spoke when" in your podcast episodes. This feature uses WhisperX to combine transcription with speaker identification.
+
+### How It Works
+
+1. **Transcription**: WhisperX transcribes the audio (like Whisper)
+2. **Alignment**: Improves timestamp accuracy at the word level
+3. **Diarization**: Identifies different speakers and labels segments
+4. **Output**: Creates formatted transcripts with speaker labels
+
+### Requirements
+
+- **HuggingFace Token**: Free token from https://huggingface.co/settings/tokens
+  - Used to download pyannote speaker diarization models
+  - One-time model download (~200MB), then cached locally
+
+### Setup
+
+1. **Get HuggingFace Token:**
+   - Visit https://huggingface.co/settings/tokens
+   - Create a new token (read access is sufficient)
+   - Copy the token
+
+2. **Enable in docker-compose.yml:**
+```yaml
+environment:
+  - ENABLE_TRANSCRIPTION=true
+  - ENABLE_SPEAKER_DIARIZATION=true
+  - HUGGINGFACE_TOKEN=hf_your_token_here
+  - MIN_SPEAKERS=2  # Optional: expected minimum speakers
+  - MAX_SPEAKERS=4  # Optional: expected maximum speakers
+```
+
+3. **Run the generator:**
+```bash
+docker-compose up -d
+```
+
+### Output Formats
+
+**JSON Transcript** (`YYYY-MM-DD.transcript.json`):
+```json
+{
+  "text": "Full transcript text...",
+  "language": "en",
+  "segments": [
+    {
+      "start": 0.5,
+      "end": 3.2,
+      "text": "Welcome to the podcast!",
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "start": 3.5,
+      "end": 7.8,
+      "text": "Thanks for having me.",
+      "speaker": "SPEAKER_01"
+    }
+  ]
+}
+```
+
+**HTML Display:**
+- Formatted paragraphs with speaker labels
+- Automatic paragraph breaks when speaker changes
+- Speaker names highlighted in blue
+
+**Example HTML output:**
+> **SPEAKER_00:** Welcome to the podcast! I'm really excited to talk about this topic today.
+>
+> **SPEAKER_01:** Thanks for having me. I've been looking forward to this conversation.
+>
+> **SPEAKER_00:** Let's dive right in...
+
+**Plain Text** (`YYYY-MM-DD.txt`):
+- Simple text version without speaker labels
+- For backward compatibility
+
+### Speaker Count Hints
+
+Providing `MIN_SPEAKERS` and `MAX_SPEAKERS` helps the diarization model:
+
+```yaml
+# For a two-person interview
+- MIN_SPEAKERS=2
+- MAX_SPEAKERS=2
+
+# For a panel discussion with 3-5 people
+- MIN_SPEAKERS=3
+- MAX_SPEAKERS=5
+```
+
+If not specified, the model will automatically detect the number of speakers.
+
+### Performance Impact
+
+Speaker diarization adds processing time:
+- **Without diarization**: ~4 minutes for 1-hour episode (base model, CPU)
+- **With diarization**: ~8-10 minutes for 1-hour episode (base model, CPU)
+
+The extra time is for:
+- Word-level alignment
+- Speaker detection analysis
+- Speaker assignment to segments
+
+### Limitations
+
+- Speaker labels are generic: `SPEAKER_00`, `SPEAKER_01`, etc.
+- Does not identify speakers by name automatically
+- Works best with clear audio and distinct voices
+- Accuracy varies with audio quality and speaker overlap
+
+### Transcript Location
+
+**Important:** Transcripts are NOT included in the RSS feed XML to keep feed sizes manageable.
+
+**Where transcripts appear:**
+- ✅ **HTML page** - Formatted with speaker labels
+- ✅ **JSON file** - Full data with timestamps and speakers
+- ✅ **TXT file** - Plain text version
+- ❌ **RSS feed** - Not included
 
 ## Publishing Your Podcast
 
