@@ -7,20 +7,33 @@ Scans a directory of podcast episodes and generates an RSS feed and HTML page.
 import os
 import json
 import shutil
+import logging
 from pathlib import Path
 from datetime import datetime
 from xml.etree.ElementTree import Element, SubElement, ElementTree, tostring
 from xml.dom import minidom
 import hashlib
 
+# Configure logging
+DEBUG = os.getenv('DEBUG', 'false').lower() in ('true', '1', 'yes')
+logging.basicConfig(
+    level=logging.DEBUG if DEBUG else logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
 
 def get_file_hash(filepath):
     """Generate MD5 hash of file for change detection."""
+    logger.debug(f"Computing hash for {filepath}")
     hash_md5 = hashlib.md5()
     with open(filepath, "rb") as f:
         for chunk in iter(lambda: f.read(4096), b""):
             hash_md5.update(chunk)
-    return hash_md5.hexdigest()
+    hash_value = hash_md5.hexdigest()
+    logger.debug(f"Hash for {filepath}: {hash_value}")
+    return hash_value
 
 
 def seconds_to_duration(seconds):
@@ -58,6 +71,7 @@ def format_chapters_as_text(chapters):
 
 def parse_episode_metadata(json_path):
     """Parse episode metadata from JSON file (YouTube format)."""
+    logger.debug(f"Parsing metadata from {json_path}")
     with open(json_path, 'r') as f:
         data = json.load(f)
 
@@ -69,18 +83,23 @@ def parse_episode_metadata(json_path):
         'chapters': data.get('chapters', []),
     }
 
+    logger.debug(f"  Title: {metadata['title']}")
+    logger.debug(f"  Chapters: {len(metadata['chapters'])} found")
+
     # Convert upload_date (YYYYMMDD) to ISO 8601 format
     if 'upload_date' in data:
         try:
             date_str = data['upload_date']
             dt = datetime.strptime(date_str, '%Y%m%d')
             metadata['pub_date'] = dt.isoformat() + 'Z'
-        except:
-            pass
+            logger.debug(f"  Pub date: {metadata['pub_date']}")
+        except Exception as e:
+            logger.warning(f"  Failed to parse upload_date: {e}")
 
     # Convert duration from seconds to HH:MM:SS
     if 'duration' in data:
         metadata['duration'] = seconds_to_duration(data['duration'])
+        logger.debug(f"  Duration: {metadata['duration']}")
 
     # Extract other useful fields
     metadata['author'] = data.get('uploader', data.get('channel', ''))
@@ -89,6 +108,7 @@ def parse_episode_metadata(json_path):
     # Generate a unique GUID from the video ID
     if 'id' in data:
         metadata['guid'] = f"youtube-{data['id']}"
+        logger.debug(f"  GUID: {metadata['guid']}")
 
     return metadata
 
@@ -108,22 +128,29 @@ def find_episodes(input_dir):
     input_path = Path(input_dir)
 
     if not input_path.exists():
-        print(f"Input directory {input_dir} does not exist")
+        logger.error(f"Input directory {input_dir} does not exist")
         return episodes
+
+    logger.debug(f"Scanning {input_path} for episode folders")
 
     # Look for folders containing both .mp3 and .info.json files
     for folder in sorted(input_path.iterdir()):
         if not folder.is_dir():
+            logger.debug(f"Skipping non-directory: {folder.name}")
             continue
+
+        logger.debug(f"Scanning folder: {folder.name}")
 
         # Look for .info.json files (YouTube format)
         info_json_files = list(folder.glob("*.info.json"))
+        logger.debug(f"  Found {len(info_json_files)} .info.json file(s)")
 
         if info_json_files:
             # Process each info.json file
             for json_file in info_json_files:
                 # Extract the base date from the filename (e.g., "2025-09-26" from "2025-09-26.info.json")
                 base_name = json_file.stem.replace('.info', '')
+                logger.debug(f"  Processing: {json_file.name} (base: {base_name})")
 
                 # Look for corresponding MP3 file
                 mp3_file = folder / f"{base_name}.mp3"
@@ -132,6 +159,12 @@ def find_episodes(input_dir):
                 thumb_file = folder / f"{base_name}-thumb.jpg"
 
                 if mp3_file.exists():
+                    logger.debug(f"    MP3 found: {mp3_file.name}")
+                    if thumb_file.exists():
+                        logger.debug(f"    Thumbnail found: {thumb_file.name}")
+                    else:
+                        logger.debug(f"    No thumbnail found")
+
                     try:
                         metadata = parse_episode_metadata(json_file)
 
@@ -139,25 +172,33 @@ def find_episodes(input_dir):
                         if thumb_file.exists():
                             metadata['thumbnail_file'] = thumb_file
 
+                        mp3_size = get_mp3_size(mp3_file)
                         episode = {
                             'folder_name': folder.name,
                             'mp3_path': mp3_file,
                             'mp3_filename': mp3_file.name,
-                            'mp3_size': get_mp3_size(mp3_file),
+                            'mp3_size': mp3_size,
                             'metadata': metadata
                         }
                         episodes.append(episode)
-                        print(f"Found episode: {metadata.get('title', folder.name)}")
+                        logger.info(f"Found episode: {metadata.get('title', folder.name)}")
+                        logger.debug(f"    MP3 size: {mp3_size} bytes")
                     except Exception as e:
-                        print(f"Error processing {json_file.name}: {e}")
+                        logger.error(f"Error processing {json_file.name}: {e}")
                         import traceback
                         traceback.print_exc()
+                else:
+                    logger.warning(f"    MP3 file not found: {mp3_file.name}")
 
     return episodes
 
 
 def generate_rss_feed(episodes, podcast_info, base_url):
     """Generate RSS 2.0 podcast feed XML."""
+    logger.debug(f"Generating RSS feed with {len(episodes)} episodes")
+    logger.debug(f"  Podcast title: {podcast_info.get('title')}")
+    logger.debug(f"  Base URL: {base_url}")
+
     rss = Element('rss')
     rss.set('version', '2.0')
     rss.set('xmlns:itunes', 'http://www.itunes.com/dtds/podcast-1.0.dtd')
@@ -394,6 +435,13 @@ def main():
     OUTPUT_DIR = os.getenv('OUTPUT_DIR', '/output')
     BASE_URL = os.getenv('BASE_URL', 'http://localhost')
 
+    logger.info("=== Podcast Feed Generator ===")
+    logger.info(f"Debug mode: {'ENABLED' if DEBUG else 'DISABLED'}")
+    logger.debug(f"Configuration:")
+    logger.debug(f"  INPUT_DIR: {INPUT_DIR}")
+    logger.debug(f"  OUTPUT_DIR: {OUTPUT_DIR}")
+    logger.debug(f"  BASE_URL: {BASE_URL}")
+
     # Podcast metadata (can be overridden with env vars or config file)
     podcast_info = {
         'title': os.getenv('PODCAST_TITLE', 'My Podcast'),
@@ -403,68 +451,93 @@ def main():
         'explicit': os.getenv('PODCAST_EXPLICIT', 'no'),
     }
 
+    logger.debug(f"Podcast metadata:")
+    logger.debug(f"  Title: {podcast_info['title']}")
+    logger.debug(f"  Author: {podcast_info['author']}")
+    logger.debug(f"  Language: {podcast_info['language']}")
+
     # Optional image URL
     if os.getenv('PODCAST_IMAGE_URL'):
         podcast_info['image_url'] = os.getenv('PODCAST_IMAGE_URL')
+        logger.debug(f"  Image URL: {podcast_info['image_url']}")
 
     # Check for podcast_info.json in input directory
     podcast_info_file = Path(INPUT_DIR) / 'podcast_info.json'
     if podcast_info_file.exists():
+        logger.debug(f"Loading podcast info from {podcast_info_file}")
         with open(podcast_info_file, 'r') as f:
             podcast_info.update(json.load(f))
 
-    print(f"Scanning {INPUT_DIR} for episodes...")
+    logger.info(f"Scanning {INPUT_DIR} for episodes...")
     episodes = find_episodes(INPUT_DIR)
 
     if not episodes:
-        print("No episodes found!")
+        logger.warning("No episodes found!")
         return
 
-    print(f"Found {len(episodes)} episode(s)")
+    logger.info(f"Found {len(episodes)} episode(s)")
 
     # Create output directory structure
     output_path = Path(OUTPUT_DIR)
     output_path.mkdir(exist_ok=True)
     episodes_dir = output_path / 'episodes'
     episodes_dir.mkdir(exist_ok=True)
+    logger.debug(f"Output directories created: {output_path}, {episodes_dir}")
 
     # Copy MP3 files and thumbnails to output directory
-    print("Copying MP3 files...")
+    logger.info("Copying MP3 files and thumbnails...")
+    copied_files = 0
+    skipped_files = 0
     for episode in episodes:
         # Copy MP3
         dest = episodes_dir / episode['mp3_filename']
         if not dest.exists() or get_file_hash(episode['mp3_path']) != get_file_hash(dest):
+            logger.debug(f"  Copying {episode['mp3_filename']}")
             shutil.copy2(episode['mp3_path'], dest)
-            print(f"  Copied {episode['mp3_filename']}")
+            logger.info(f"  Copied {episode['mp3_filename']}")
+            copied_files += 1
+        else:
+            logger.debug(f"  Skipping {episode['mp3_filename']} (unchanged)")
+            skipped_files += 1
 
         # Copy thumbnail if it exists
         if 'thumbnail_file' in episode['metadata']:
             thumb_src = episode['metadata']['thumbnail_file']
             thumb_dest = episodes_dir / thumb_src.name
             if not thumb_dest.exists() or get_file_hash(thumb_src) != get_file_hash(thumb_dest):
+                logger.debug(f"  Copying thumbnail {thumb_src.name}")
                 shutil.copy2(thumb_src, thumb_dest)
-                print(f"  Copied {thumb_src.name}")
+                logger.info(f"  Copied {thumb_src.name}")
+                copied_files += 1
+            else:
+                logger.debug(f"  Skipping thumbnail {thumb_src.name} (unchanged)")
+                skipped_files += 1
+
+    logger.info(f"File copy complete: {copied_files} copied, {skipped_files} skipped")
 
     # Generate RSS feed
-    print("Generating RSS feed...")
+    logger.info("Generating RSS feed...")
     rss = generate_rss_feed(episodes, podcast_info, BASE_URL)
+    logger.debug("Converting RSS to XML string")
     xml_str = prettify_xml(rss)
 
     feed_path = output_path / 'feed.xml'
+    logger.debug(f"Writing RSS feed to {feed_path}")
     with open(feed_path, 'w') as f:
         f.write(xml_str)
-    print(f"  RSS feed written to {feed_path}")
+    logger.info(f"  RSS feed written to {feed_path}")
 
     # Generate HTML page
-    print("Generating HTML page...")
+    logger.info("Generating HTML page...")
     html = generate_html_page(episodes, podcast_info)
 
     index_path = output_path / 'index.html'
+    logger.debug(f"Writing HTML page to {index_path}")
     with open(index_path, 'w') as f:
         f.write(html)
-    print(f"  HTML page written to {index_path}")
+    logger.info(f"  HTML page written to {index_path}")
 
-    print("Done!")
+    logger.info("Done!")
 
 
 if __name__ == '__main__':
