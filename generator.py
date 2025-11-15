@@ -9,7 +9,7 @@ import json
 import shutil
 from pathlib import Path
 from datetime import datetime
-from xml.etree.ElementTree import Element, SubElement, ElementTree
+from xml.etree.ElementTree import Element, SubElement, ElementTree, tostring
 from xml.dom import minidom
 import hashlib
 
@@ -260,7 +260,7 @@ def generate_rss_feed(episodes, podcast_info, base_url):
 
 def prettify_xml(elem):
     """Return a pretty-printed XML string."""
-    rough_string = ElementTree.tostring(elem, encoding='unicode')
+    rough_string = tostring(elem, encoding='unicode')
     reparsed = minidom.parseString(rough_string)
     return reparsed.toprettyxml(indent="  ")
 
