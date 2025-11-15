@@ -13,6 +13,22 @@ from xml.etree.ElementTree import Element, SubElement, ElementTree
 from xml.dom import minidom
 import hashlib
 
+# Import Whisper for transcription (will be None if not available)
+try:
+    import whisper
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WHISPER_AVAILABLE = False
+    print("Warning: Whisper not available. Transcription will be disabled.")
+
+# Import WhisperX for speaker diarization (optional)
+try:
+    import whisperx
+    WHISPERX_AVAILABLE = True
+except ImportError:
+    WHISPERX_AVAILABLE = False
+    print("Warning: WhisperX not available. Speaker diarization will be disabled.")
+
 
 def get_file_hash(filepath):
     """Generate MD5 hash of file for change detection."""
@@ -54,6 +70,60 @@ def format_chapters_as_text(chapters):
         lines.append(f"{timestamp} {title}")
 
     return "\n".join(lines)
+
+
+def format_transcript_for_html(transcript_data):
+    """
+    Format transcript data into HTML paragraphs with speaker labels.
+
+    Args:
+        transcript_data: Dictionary with 'segments' from WhisperX
+
+    Returns:
+        HTML string with formatted transcript
+    """
+    if not transcript_data or 'segments' not in transcript_data:
+        return ""
+
+    segments = transcript_data['segments']
+    if not segments:
+        return ""
+
+    html_parts = []
+    current_speaker = None
+    current_paragraph = []
+
+    for segment in segments:
+        speaker = segment.get('speaker', None)
+        text = segment.get('text', '').strip()
+
+        if not text:
+            continue
+
+        # If speaker changed, start a new paragraph
+        if speaker != current_speaker:
+            # Save previous paragraph if it exists
+            if current_paragraph:
+                paragraph_text = ' '.join(current_paragraph)
+                if current_speaker:
+                    html_parts.append(f'<p><strong>{current_speaker}:</strong> {paragraph_text}</p>')
+                else:
+                    html_parts.append(f'<p>{paragraph_text}</p>')
+                current_paragraph = []
+
+            current_speaker = speaker
+
+        current_paragraph.append(text)
+
+    # Add final paragraph
+    if current_paragraph:
+        paragraph_text = ' '.join(current_paragraph)
+        if current_speaker:
+            html_parts.append(f'<p><strong>{current_speaker}:</strong> {paragraph_text}</p>')
+        else:
+            html_parts.append(f'<p>{paragraph_text}</p>')
+
+    return '\n'.join(html_parts)
 
 
 def parse_episode_metadata(json_path):
@@ -98,10 +168,135 @@ def get_mp3_size(mp3_path):
     return os.path.getsize(mp3_path)
 
 
+def transcribe_audio(audio_path, transcript_path=None, model_name="base", initial_prompt=""):
+    """
+    Transcribe audio file using Whisper.
+
+    Args:
+        audio_path: Path to the audio file (MP3, WAV, etc.)
+        transcript_path: Optional path to save transcript to. If None, returns transcript text only.
+        model_name: Whisper model to use (tiny, base, small, medium, large)
+        initial_prompt: Optional text to guide the model (speaker names, technical terms, etc.)
+
+    Returns:
+        Transcript text string
+    """
+    if not WHISPER_AVAILABLE:
+        print(f"  Skipping transcription for {audio_path.name} (Whisper not available)")
+        return None
+
+    try:
+        print(f"  Loading Whisper model '{model_name}'...")
+        model = whisper.load_model(model_name)
+
+        print(f"  Transcribing {audio_path.name}...")
+
+        # Build transcribe options
+        transcribe_options = {}
+        if initial_prompt:
+            transcribe_options['initial_prompt'] = initial_prompt
+            print(f"  Using custom prompt: {initial_prompt[:50]}...")
+
+        result = model.transcribe(str(audio_path), **transcribe_options)
+
+        transcript_text = result["text"].strip()
+
+        # Save to file if path provided
+        if transcript_path:
+            with open(transcript_path, 'w', encoding='utf-8') as f:
+                f.write(transcript_text)
+            print(f"  Transcript saved to {transcript_path.name}")
+
+        return transcript_text
+
+    except Exception as e:
+        print(f"  Error transcribing {audio_path.name}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def transcribe_with_whisperx(audio_path, model_name="base", initial_prompt="", hf_token=None, min_speakers=None, max_speakers=None):
+    """
+    Transcribe audio file using WhisperX with speaker diarization.
+
+    Args:
+        audio_path: Path to the audio file
+        model_name: Whisper model to use (tiny, base, small, medium, large)
+        initial_prompt: Optional text to guide the model
+        hf_token: HuggingFace token for speaker diarization (required for diarization)
+        min_speakers: Minimum number of speakers (optional)
+        max_speakers: Maximum number of speakers (optional)
+
+    Returns:
+        Dictionary with 'text', 'segments', and structured data for JSON/HTML
+    """
+    if not WHISPERX_AVAILABLE:
+        print(f"  WhisperX not available, falling back to regular Whisper")
+        return None
+
+    try:
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        compute_type = "float16" if device == "cuda" else "float32"
+
+        print(f"  Loading WhisperX model '{model_name}' on {device}...")
+        model = whisperx.load_model(model_name, device, compute_type=compute_type)
+
+        # Load audio
+        print(f"  Loading audio from {audio_path.name}...")
+        audio = whisperx.load_audio(str(audio_path))
+
+        # Transcribe
+        print(f"  Transcribing with WhisperX...")
+        transcribe_options = {}
+        if initial_prompt:
+            transcribe_options['initial_prompt'] = initial_prompt
+            print(f"  Using custom prompt: {initial_prompt[:50]}...")
+
+        result = model.transcribe(audio, batch_size=16, **transcribe_options)
+
+        # Align whisper output
+        print(f"  Aligning timestamps...")
+        model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=device)
+        result = whisperx.align(result["segments"], model_a, metadata, audio, device, return_char_alignments=False)
+
+        # Perform speaker diarization if token provided
+        if hf_token:
+            print(f"  Performing speaker diarization...")
+            try:
+                diarize_model = whisperx.DiarizationPipeline(use_auth_token=hf_token, device=device)
+
+                diarize_segments = diarize_model(audio, min_speakers=min_speakers, max_speakers=max_speakers)
+                result = whisperx.assign_word_speakers(diarize_segments, result)
+                print(f"  Speaker diarization completed")
+            except Exception as e:
+                print(f"  Warning: Speaker diarization failed: {e}")
+                print(f"  Continuing without speaker labels...")
+        else:
+            print(f"  Skipping speaker diarization (no HuggingFace token provided)")
+
+        # Build structured result
+        full_text = " ".join([seg.get("text", "").strip() for seg in result["segments"]])
+
+        return {
+            'text': full_text,
+            'segments': result["segments"],
+            'language': result.get("language", "unknown")
+        }
+
+    except Exception as e:
+        print(f"  Error transcribing with WhisperX {audio_path.name}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 def find_episodes(input_dir):
     """
     Scan input directory for episode folders containing .mp3 and .info.json files.
     Expects files named like: YYYY-MM-DD.mp3, YYYY-MM-DD.info.json, YYYY-MM-DD-thumb.jpg
+    Optionally generates or loads transcripts using Whisper.
     Returns list of episode data dictionaries.
     """
     episodes = []
@@ -110,6 +305,29 @@ def find_episodes(input_dir):
     if not input_path.exists():
         print(f"Input directory {input_dir} does not exist")
         return episodes
+
+    # Get transcription settings from environment
+    enable_transcription = os.getenv('ENABLE_TRANSCRIPTION', 'false').lower() == 'true'
+    whisper_model = os.getenv('WHISPER_MODEL', 'base')  # tiny, base, small, medium, large
+    whisper_prompt = os.getenv('WHISPER_PROMPT', '')  # Optional initial prompt for context
+
+    # Speaker diarization settings
+    enable_diarization = os.getenv('ENABLE_SPEAKER_DIARIZATION', 'false').lower() == 'true'
+    hf_token = os.getenv('HUGGINGFACE_TOKEN', '')
+    min_speakers = os.getenv('MIN_SPEAKERS', None)
+    max_speakers = os.getenv('MAX_SPEAKERS', None)
+
+    # Convert speaker counts to integers if provided
+    if min_speakers:
+        try:
+            min_speakers = int(min_speakers)
+        except ValueError:
+            min_speakers = None
+    if max_speakers:
+        try:
+            max_speakers = int(max_speakers)
+        except ValueError:
+            max_speakers = None
 
     # Look for folders containing both .mp3 and .info.json files
     for folder in sorted(input_path.iterdir()):
@@ -131,6 +349,10 @@ def find_episodes(input_dir):
                 # Look for thumbnail
                 thumb_file = folder / f"{base_name}-thumb.jpg"
 
+                # Look for transcript files
+                transcript_file = folder / f"{base_name}.txt"
+                transcript_json_file = folder / f"{base_name}.transcript.json"
+
                 if mp3_file.exists():
                     try:
                         metadata = parse_episode_metadata(json_file)
@@ -138,6 +360,54 @@ def find_episodes(input_dir):
                         # Add thumbnail path if it exists
                         if thumb_file.exists():
                             metadata['thumbnail_file'] = thumb_file
+
+                        # Handle transcription
+                        transcript_data = None
+                        transcript_text = None
+
+                        # Check for existing JSON transcript (WhisperX format)
+                        if transcript_json_file.exists():
+                            print(f"  Loading existing transcript from {transcript_json_file.name}")
+                            with open(transcript_json_file, 'r', encoding='utf-8') as f:
+                                transcript_data = json.load(f)
+                                transcript_text = transcript_data.get('text', '')
+                        # Check for existing plain text transcript
+                        elif transcript_file.exists():
+                            print(f"  Loading existing transcript from {transcript_file.name}")
+                            with open(transcript_file, 'r', encoding='utf-8') as f:
+                                transcript_text = f.read().strip()
+                        # Generate new transcript if enabled
+                        elif enable_transcription:
+                            # Use WhisperX if diarization is enabled
+                            if enable_diarization and WHISPERX_AVAILABLE and hf_token:
+                                print(f"  Generating transcript with speaker diarization for {mp3_file.name}...")
+                                transcript_data = transcribe_with_whisperx(
+                                    mp3_file,
+                                    model_name=whisper_model,
+                                    initial_prompt=whisper_prompt,
+                                    hf_token=hf_token,
+                                    min_speakers=min_speakers,
+                                    max_speakers=max_speakers
+                                )
+                                if transcript_data:
+                                    transcript_text = transcript_data['text']
+                                    # Save JSON transcript
+                                    with open(transcript_json_file, 'w', encoding='utf-8') as f:
+                                        json.dump(transcript_data, f, indent=2, ensure_ascii=False)
+                                    print(f"  Transcript JSON saved to {transcript_json_file.name}")
+                                    # Also save plain text version
+                                    with open(transcript_file, 'w', encoding='utf-8') as f:
+                                        f.write(transcript_text)
+                            # Fall back to regular Whisper
+                            elif WHISPER_AVAILABLE:
+                                print(f"  Generating transcript for {mp3_file.name}...")
+                                transcript_text = transcribe_audio(mp3_file, transcript_file, whisper_model, whisper_prompt)
+
+                        # Add transcript data to metadata
+                        if transcript_data:
+                            metadata['transcript_data'] = transcript_data  # Full structured data
+                        if transcript_text:
+                            metadata['transcript'] = transcript_text  # Plain text for backward compat
 
                         episode = {
                             'folder_name': folder.name,
@@ -203,7 +473,7 @@ def generate_rss_feed(episodes, podcast_info, base_url):
 
         SubElement(item, 'title').text = meta.get('title', episode['folder_name'])
 
-        # Build description with chapters and source link
+        # Build description with chapters and source link (NO transcripts in RSS)
         description = meta.get('description', '')
 
         # Add chapters/timestamps if available
@@ -302,6 +572,27 @@ def generate_html_page(episodes, podcast_info):
             white-space: pre-wrap;
             margin: 15px 0;
         }}
+        .transcript {{
+            background-color: #e8f4f8;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            border-left: 4px solid #0066cc;
+        }}
+        .transcript h4 {{
+            margin-top: 0;
+            color: #0066cc;
+        }}
+        .transcript-text {{
+            line-height: 1.8;
+            font-size: 0.95em;
+        }}
+        .transcript-text p {{
+            margin: 10px 0;
+        }}
+        .transcript-text strong {{
+            color: #0066cc;
+        }}
         .chapters {{
             background-color: #f5f5f5;
             padding: 15px;
@@ -343,6 +634,8 @@ def generate_html_page(episodes, podcast_info):
         pub_date = meta.get('pub_date', '')
         webpage_url = meta.get('webpage_url', '')
         chapters = meta.get('chapters', [])
+        transcript_data = meta.get('transcript_data', None)
+        transcript = meta.get('transcript', '')
 
         html += f"""    <div class="episode">
         <h3>{title}</h3>
@@ -365,6 +658,25 @@ def generate_html_page(episodes, podcast_info):
         if description:
             html += f"""
         <div class="description">{description}</div>
+"""
+
+        # Display formatted transcript with speakers if available
+        if transcript_data:
+            formatted_transcript = format_transcript_for_html(transcript_data)
+            if formatted_transcript:
+                html += f"""
+        <div class="transcript">
+            <h4>Transcript</h4>
+            <div class="transcript-text">{formatted_transcript}</div>
+        </div>
+"""
+        # Fall back to plain text transcript
+        elif transcript:
+            html += f"""
+        <div class="transcript">
+            <h4>Transcript</h4>
+            <div class="transcript-text"><p>{transcript}</p></div>
+        </div>
 """
 
         if chapters:

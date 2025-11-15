@@ -30,6 +30,20 @@ services:
       # Useful if you're adding new episodes while the container is running
       - REGEN_INTERVAL=300  # 5 minutes
 
+      # Transcription settings (disabled by default - enable to use)
+      - ENABLE_TRANSCRIPTION=false  # Set to 'true' to enable automatic transcription
+      - WHISPER_MODEL=base  # Options: tiny, base, small, medium, large
+      # Optional: Custom prompt to guide transcription (speaker names, technical terms, etc.)
+      # - WHISPER_PROMPT=This podcast features John and Sarah discussing technology topics like Kubernetes, Docker, and API development.
+
+      # Speaker diarization (requires HuggingFace token)
+      - ENABLE_SPEAKER_DIARIZATION=false  # Set to 'true' to enable speaker identification
+      # Get your free token at https://huggingface.co/settings/tokens
+      # - HUGGINGFACE_TOKEN=your_token_here
+      # Optional: Set expected number of speakers
+      # - MIN_SPEAKERS=2
+      # - MAX_SPEAKERS=4
+
     # Optional: Add logging
     logging:
       driver: "json-file"

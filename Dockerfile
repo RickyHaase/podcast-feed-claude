@@ -1,7 +1,16 @@
 FROM caddy:2-alpine
 
-# Install Python 3
-RUN apk add --no-cache python3 py3-pip
+# Install Python 3, ffmpeg (required by Whisper), and build dependencies
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    ffmpeg \
+    py3-numpy \
+    py3-torch \
+    py3-torch-vision \
+    && pip3 install --no-cache-dir --break-system-packages \
+       openai-whisper \
+       whisperx
 
 # Create working directory
 WORKDIR /app

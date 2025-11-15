@@ -5,6 +5,8 @@ A self-contained Docker solution for generating podcast RSS feeds and a simple s
 ## Features
 
 - Automatically generates RSS 2.0 podcast feed from MP3 files
+- **Automatic transcription using OpenAI Whisper**
+- **Speaker diarization (identification) using WhisperX**
 - Creates a simple HTML page for browsing episodes
 - Serves everything with Caddy web server
 - Self-contained Docker container
@@ -35,6 +37,8 @@ Each episode folder should contain:
 - One `.mp3` file (your podcast episode) - named with date: `YYYY-MM-DD.mp3`
 - One `.info.json` file (YouTube-style metadata) - named: `YYYY-MM-DD.info.json`
 - One thumbnail file (optional) - named: `YYYY-MM-DD-thumb.jpg`
+- One transcript file (optional) - named: `YYYY-MM-DD.txt` (auto-generated if transcription enabled)
+- One JSON transcript (optional) - named: `YYYY-MM-DD.transcript.json` (auto-generated with speaker diarization)
 
 ### 2. Episode Metadata Format
 
@@ -135,6 +139,22 @@ Configure your podcast using environment variables:
 - `OUTPUT_DIR`: Output directory path (default: "/output")
 - `REGEN_INTERVAL`: Auto-regenerate interval in seconds (default: 0 = run once)
 
+**Transcription Configuration:**
+- `ENABLE_TRANSCRIPTION`: Enable automatic transcription (default: "false" - must be enabled explicitly)
+- `WHISPER_MODEL`: Whisper model to use - "tiny", "base", "small", "medium", "large" (default: "base")
+  - **tiny**: Fastest, lower quality (~1GB RAM, ~32x realtime)
+  - **base**: Balanced speed and quality (~1GB RAM, ~16x realtime) - **recommended**
+  - **small**: Better quality (~2GB RAM, ~6x realtime)
+  - **medium**: High quality (~5GB RAM, ~2x realtime)
+  - **large**: Best quality (~10GB RAM, ~1x realtime)
+- `WHISPER_PROMPT`: Optional custom prompt to guide transcription with context (speaker names, technical terms, etc.)
+
+**Speaker Diarization Configuration:**
+- `ENABLE_SPEAKER_DIARIZATION`: Enable speaker identification (default: "false")
+- `HUGGINGFACE_TOKEN`: Required HuggingFace token for speaker diarization models ([Get free token here](https://huggingface.co/settings/tokens))
+- `MIN_SPEAKERS`: Minimum expected number of speakers (optional, e.g., "2")
+- `MAX_SPEAKERS`: Maximum expected number of speakers (optional, e.g., "4")
+
 ### Alternative: podcast_info.json
 
 Instead of environment variables, you can place a `podcast_info.json` file in your input directory:
@@ -179,6 +199,253 @@ environment:
 ```
 
 Set to `0` (default) to only generate on container startup.
+
+## Transcription
+
+The podcast feed generator includes automatic transcription using OpenAI's Whisper model.
+
+### How It Works
+
+1. **Automatic Transcription**: When processing episodes, the generator checks for existing transcript files (`.txt`)
+2. **Cache System**: If a transcript exists, it's loaded from the file. Otherwise, Whisper transcribes the audio
+3. **Storage**: Transcripts are saved as `.txt` files alongside your MP3s for reuse
+4. **Integration**: Transcripts appear in both the RSS feed description and HTML page
+
+### Transcription Workflow
+
+```
+Episode Processing
+├─ Check for YYYY-MM-DD.txt
+├─ If exists: Load existing transcript
+├─ If not exists and ENABLE_TRANSCRIPTION=true:
+│   ├─ Load Whisper model
+│   ├─ Transcribe audio
+│   └─ Save to YYYY-MM-DD.txt
+└─ Add transcript to RSS feed and HTML
+```
+
+### Configuring Transcription
+
+**Enable/Disable:**
+```yaml
+environment:
+  - ENABLE_TRANSCRIPTION=true  # Enable transcription
+  # Transcription is disabled by default to save resources
+```
+
+**Choose Model:**
+```yaml
+environment:
+  - WHISPER_MODEL=base  # Recommended for most use cases
+  # Options: tiny, base, small, medium, large
+```
+
+**Custom Prompt (Improve Accuracy):**
+```yaml
+environment:
+  - WHISPER_PROMPT=This podcast features John and Sarah discussing technology topics like Kubernetes, Docker, and API development.
+```
+
+The custom prompt helps Whisper:
+- Correctly spell technical terms, product names, and jargon
+- Identify speaker names and context
+- Maintain consistency with your podcast's terminology
+- Improve accuracy for domain-specific content
+
+**Example prompts:**
+- `"Hosts: Dr. Jane Smith and Mike Chen. Topics: machine learning, neural networks, TensorFlow, PyTorch."`
+- `"Medical podcast discussing cardiology, oncology, pharmaceuticals."`
+- `"True crime podcast about the FBI, forensics, and criminal investigations."`
+
+**Model Selection Guide:**
+- Use **tiny** for quick testing or low-resource environments
+- Use **base** (default) for good balance of speed and quality
+- Use **small** or **medium** for better accuracy with longer processing time
+- Use **large** only if you need maximum accuracy and have powerful hardware
+
+### Performance Notes
+
+- First transcription downloads the Whisper model (~140MB for base model)
+- Processing time varies by model and episode length
+- Transcripts are cached, so subsequent runs are instant
+- Transcription happens during feed generation, not while serving
+- **CPU vs GPU**: By default, Whisper runs on CPU which is sufficient for most use cases
+
+### GPU Acceleration (Optional)
+
+Whisper can use GPU acceleration for significantly faster transcription:
+
+**Do you need GPU?**
+- **No, if**: You're transcribing occasionally or have time to wait (CPU works fine)
+- **Yes, if**: You're batch-processing many episodes or need faster turnaround
+
+**CPU Performance** (approximate for 1-hour episode):
+- tiny: ~2 minutes
+- base: ~4 minutes
+- small: ~10 minutes
+- medium: ~30 minutes
+- large: ~60 minutes
+
+**GPU Performance** (with NVIDIA GPU):
+- All models: 2-5x faster than CPU
+
+**To enable GPU support:**
+
+1. Ensure you have NVIDIA GPU and nvidia-docker installed on host
+2. Update `docker-compose.yml`:
+
+```yaml
+services:
+  podcast-feed:
+    # ... existing config ...
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+```
+
+3. The container will automatically use GPU if available
+
+**Note**: The current Docker image uses CPU-only PyTorch from Alpine packages. For GPU support, you would need to modify the Dockerfile to install CUDA-enabled PyTorch, which significantly increases image size (~4GB vs ~500MB).
+
+### Manual Transcripts
+
+You can provide your own transcripts by creating `.txt` files:
+
+```
+2025-09-26/
+├── 2025-09-26.mp3
+├── 2025-09-26.info.json
+└── 2025-09-26.txt  ← Your custom transcript
+```
+
+If a `.txt` file exists, Whisper transcription is skipped for that episode.
+
+## Speaker Diarization
+
+Speaker diarization identifies "who spoke when" in your podcast episodes. This feature uses WhisperX to combine transcription with speaker identification.
+
+### How It Works
+
+1. **Transcription**: WhisperX transcribes the audio (like Whisper)
+2. **Alignment**: Improves timestamp accuracy at the word level
+3. **Diarization**: Identifies different speakers and labels segments
+4. **Output**: Creates formatted transcripts with speaker labels
+
+### Requirements
+
+- **HuggingFace Token**: Free token from https://huggingface.co/settings/tokens
+  - Used to download pyannote speaker diarization models
+  - One-time model download (~200MB), then cached locally
+
+### Setup
+
+1. **Get HuggingFace Token:**
+   - Visit https://huggingface.co/settings/tokens
+   - Create a new token (read access is sufficient)
+   - Copy the token
+
+2. **Enable in docker-compose.yml:**
+```yaml
+environment:
+  - ENABLE_TRANSCRIPTION=true
+  - ENABLE_SPEAKER_DIARIZATION=true
+  - HUGGINGFACE_TOKEN=hf_your_token_here
+  - MIN_SPEAKERS=2  # Optional: expected minimum speakers
+  - MAX_SPEAKERS=4  # Optional: expected maximum speakers
+```
+
+3. **Run the generator:**
+```bash
+docker-compose up -d
+```
+
+### Output Formats
+
+**JSON Transcript** (`YYYY-MM-DD.transcript.json`):
+```json
+{
+  "text": "Full transcript text...",
+  "language": "en",
+  "segments": [
+    {
+      "start": 0.5,
+      "end": 3.2,
+      "text": "Welcome to the podcast!",
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "start": 3.5,
+      "end": 7.8,
+      "text": "Thanks for having me.",
+      "speaker": "SPEAKER_01"
+    }
+  ]
+}
+```
+
+**HTML Display:**
+- Formatted paragraphs with speaker labels
+- Automatic paragraph breaks when speaker changes
+- Speaker names highlighted in blue
+
+**Example HTML output:**
+> **SPEAKER_00:** Welcome to the podcast! I'm really excited to talk about this topic today.
+>
+> **SPEAKER_01:** Thanks for having me. I've been looking forward to this conversation.
+>
+> **SPEAKER_00:** Let's dive right in...
+
+**Plain Text** (`YYYY-MM-DD.txt`):
+- Simple text version without speaker labels
+- For backward compatibility
+
+### Speaker Count Hints
+
+Providing `MIN_SPEAKERS` and `MAX_SPEAKERS` helps the diarization model:
+
+```yaml
+# For a two-person interview
+- MIN_SPEAKERS=2
+- MAX_SPEAKERS=2
+
+# For a panel discussion with 3-5 people
+- MIN_SPEAKERS=3
+- MAX_SPEAKERS=5
+```
+
+If not specified, the model will automatically detect the number of speakers.
+
+### Performance Impact
+
+Speaker diarization adds processing time:
+- **Without diarization**: ~4 minutes for 1-hour episode (base model, CPU)
+- **With diarization**: ~8-10 minutes for 1-hour episode (base model, CPU)
+
+The extra time is for:
+- Word-level alignment
+- Speaker detection analysis
+- Speaker assignment to segments
+
+### Limitations
+
+- Speaker labels are generic: `SPEAKER_00`, `SPEAKER_01`, etc.
+- Does not identify speakers by name automatically
+- Works best with clear audio and distinct voices
+- Accuracy varies with audio quality and speaker overlap
+
+### Transcript Location
+
+**Important:** Transcripts are NOT included in the RSS feed XML to keep feed sizes manageable.
+
+**Where transcripts appear:**
+- ✅ **HTML page** - Formatted with speaker labels
+- ✅ **JSON file** - Full data with timestamps and speakers
+- ✅ **TXT file** - Plain text version
+- ❌ **RSS feed** - Not included
 
 ## Publishing Your Podcast
 
