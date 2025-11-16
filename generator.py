@@ -244,15 +244,8 @@ def generate_rss_feed(episodes, podcast_info, base_url):
 
         SubElement(item, 'title').text = meta.get('title', episode['folder_name'])
 
-        # Build description with chapters and source link
+        # Build description with source link
         description = meta.get('description', '')
-
-        # Add chapters/timestamps if available
-        chapters = meta.get('chapters', [])
-        if chapters:
-            chapters_text = format_chapters_as_text(chapters)
-            if chapters_text:
-                description += f"\n\nTimestamps:\n{chapters_text}"
 
         # Add source link if available
         if meta.get('webpage_url'):
@@ -343,20 +336,6 @@ def generate_html_page(episodes, podcast_info):
             white-space: pre-wrap;
             margin: 15px 0;
         }}
-        .chapters {{
-            background-color: #f5f5f5;
-            padding: 15px;
-            margin: 15px 0;
-            border-radius: 5px;
-        }}
-        .chapters h4 {{
-            margin-top: 0;
-        }}
-        .chapters-list {{
-            white-space: pre-wrap;
-            font-family: monospace;
-            font-size: 0.9em;
-        }}
         .metadata {{
             color: #666;
             font-size: 0.9em;
@@ -383,7 +362,6 @@ def generate_html_page(episodes, podcast_info):
         description = meta.get('description', '')
         pub_date = meta.get('pub_date', '')
         webpage_url = meta.get('webpage_url', '')
-        chapters = meta.get('chapters', [])
 
         html += f"""    <div class="episode">
         <h3>{title}</h3>
@@ -406,16 +384,6 @@ def generate_html_page(episodes, podcast_info):
         if description:
             html += f"""
         <div class="description">{description}</div>
-"""
-
-        if chapters:
-            chapters_text = format_chapters_as_text(chapters)
-            if chapters_text:
-                html += f"""
-        <div class="chapters">
-            <h4>Timestamps</h4>
-            <div class="chapters-list">{chapters_text}</div>
-        </div>
 """
 
         html += """    </div>
