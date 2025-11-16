@@ -13,6 +13,9 @@ services:
       # Mount the output directory for generated files
       - ./public:/output
     environment:
+      # Debug logging (set to true for verbose output)
+      - DEBUG=false  # Set to true, 1, or yes to enable debug mode
+
       # Podcast metadata (customize these)
       - PODCAST_TITLE=My Awesome Podcast
       - PODCAST_DESCRIPTION=Weekly episodes about interesting topics

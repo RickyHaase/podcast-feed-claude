@@ -10,6 +10,7 @@ A self-contained Docker solution for generating podcast RSS feeds and a simple s
 - Self-contained Docker container
 - Optional automatic regeneration when new episodes are added
 - iTunes-compatible podcast feed
+- Comprehensive debug logging for troubleshooting
 
 ## Quick Start
 
@@ -134,6 +135,7 @@ Configure your podcast using environment variables:
 - `INPUT_DIR`: Input directory path (default: "/input")
 - `OUTPUT_DIR`: Output directory path (default: "/output")
 - `REGEN_INTERVAL`: Auto-regenerate interval in seconds (default: 0 = run once)
+- `DEBUG`: Enable verbose debug logging - set to `true`, `1`, or `yes` (default: "false")
 
 ### Alternative: podcast_info.json
 
@@ -180,6 +182,58 @@ environment:
 
 Set to `0` (default) to only generate on container startup.
 
+## Debug Logging
+
+Enable detailed debug logging to troubleshoot issues or understand what the generator is doing:
+
+```yaml
+environment:
+  - DEBUG=true  # Enable debug mode
+```
+
+**Logging Levels:**
+
+- **INFO (default)**: Shows high-level progress and important events
+  ```
+  2025-11-15 00:15:30 [INFO] === Podcast Feed Generator ===
+  2025-11-15 00:15:30 [INFO] Found episode: Episode Title
+  2025-11-15 00:15:31 [INFO] Found 37 episode(s)
+  2025-11-15 00:15:32 [INFO] File copy complete: 37 copied, 0 skipped
+  ```
+
+- **DEBUG (when enabled)**: Shows detailed operation information
+  ```
+  2025-11-15 00:15:30 [DEBUG] Configuration:
+  2025-11-15 00:15:30 [DEBUG]   INPUT_DIR: /input
+  2025-11-15 00:15:30 [DEBUG]   OUTPUT_DIR: /output
+  2025-11-15 00:15:30 [DEBUG] Scanning folder: 2024-10-25
+  2025-11-15 00:15:30 [DEBUG]   Found 1 .info.json file(s)
+  2025-11-15 00:15:30 [DEBUG]   Processing: 2024-10-25.info.json
+  2025-11-15 00:15:30 [DEBUG]     MP3 found: 2024-10-25.mp3
+  2025-11-15 00:15:30 [DEBUG]     Thumbnail found: 2024-10-25-thumb.jpg
+  2025-11-15 00:15:30 [DEBUG]   Title: Episode Title
+  2025-11-15 00:15:30 [DEBUG]   Chapters: 5 found
+  2025-11-15 00:15:30 [DEBUG]   Duration: 00:35:09
+  ```
+
+**What Debug Mode Shows:**
+- Configuration values at startup
+- Directory scanning operations
+- File discovery and matching (MP3, JSON, thumbnails)
+- Episode metadata parsing details
+- File hash computations for change detection
+- File copy operations (including skipped files)
+- RSS feed generation details
+
+**Usage:**
+```bash
+# View logs in real-time
+docker logs -f podcast-feed
+
+# View last 100 lines
+docker logs --tail 100 podcast-feed
+```
+
 ## Publishing Your Podcast
 
 ### To iTunes/Apple Podcasts:
@@ -219,20 +273,45 @@ For a complete backup, also save your input directory with original files and me
 
 ## Troubleshooting
 
+**First Step: Enable Debug Logging**
+
+For any issue, start by enabling debug mode to see detailed information:
+
+```yaml
+environment:
+  - DEBUG=true
+```
+
+Then restart the container and check the logs:
+```bash
+docker-compose down
+docker-compose up -d
+docker logs -f podcast-feed
+```
+
 **No episodes showing up?**
-- Check that each episode folder has both an `.mp3` and `.json` file
+- Enable `DEBUG=true` to see which folders and files are being scanned
+- Check that each episode folder has both an `.mp3` and `.info.json` file with matching date prefixes
 - Verify JSON files are valid (use a JSON validator)
 - Check container logs: `docker logs podcast-feed`
+- Debug logs will show exactly which files are found and why others are skipped
 
 **Feed not updating?**
 - If using `REGEN_INTERVAL`, wait for the next regeneration cycle
 - Or restart the container: `docker restart podcast-feed`
 - Check that the input directory is properly mounted
+- Enable debug logging to see if files are being detected
+
+**Files not being copied?**
+- Enable `DEBUG=true` to see file copy operations
+- Debug logs show: "Copying filename" vs "Skipping filename (unchanged)"
+- Files are only copied if they don't exist or their hash has changed
 
 **Permission errors?**
 - Ensure the container can read from `/input`
 - Ensure the container can write to `/output`
 - Check volume mount permissions
+- Debug logs will show specific file access errors
 
 ## Technical Details
 
