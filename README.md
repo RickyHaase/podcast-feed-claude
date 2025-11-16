@@ -129,6 +129,8 @@ Configure your podcast using environment variables:
 - `PODCAST_LANGUAGE`: Language code (default: "en-us")
 - `PODCAST_EXPLICIT`: "yes" or "no" (default: "no")
 - `PODCAST_IMAGE_URL`: URL to podcast cover art image
+- `PRIMARY_COLOR`: Primary color for website theme in hex format (default: "#1a73e8")
+- `SECONDARY_COLOR`: Secondary color for website theme in hex format (default: "#34a853")
 
 **System Configuration:**
 - `BASE_URL`: Base URL where podcast is hosted (default: "http://localhost")
@@ -148,7 +150,9 @@ Instead of environment variables, you can place a `podcast_info.json` file in yo
   "author": "Your Name",
   "language": "en-us",
   "explicit": "no",
-  "image_url": "https://example.com/podcast-cover.jpg"
+  "image_url": "https://example.com/podcast-cover.jpg",
+  "primary_color": "#1a73e8",
+  "secondary_color": "#34a853"
 }
 ```
 

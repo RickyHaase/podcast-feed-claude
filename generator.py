@@ -314,6 +314,11 @@ def generate_html_page(episodes, podcast_info):
         reverse=True
     )
 
+    # Get color scheme from podcast_info
+    primary_color = podcast_info.get('primary_color', '#1a73e8')
+    secondary_color = podcast_info.get('secondary_color', '#34a853')
+    podcast_image = podcast_info.get('image_url', '')
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -321,60 +326,181 @@ def generate_html_page(episodes, podcast_info):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{podcast_info.get('title', 'My Podcast')}</title>
     <style>
+        * {{
+            box-sizing: border-box;
+        }}
         body {{
-            font-family: Arial, sans-serif;
-            max-width: 900px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 1000px;
             margin: 0 auto;
             padding: 20px;
             line-height: 1.6;
+            background-color: #f8f9fa;
+            color: #202124;
         }}
-        .episode {{
-            margin-bottom: 40px;
-            padding-bottom: 40px;
-            border-bottom: 1px solid #ccc;
+        .header {{
+            background: linear-gradient(135deg, {primary_color}, {secondary_color});
+            color: white;
+            padding: 40px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }}
-        .episode:last-child {{
-            border-bottom: none;
+        .header-content {{
+            display: flex;
+            align-items: center;
+            gap: 30px;
         }}
-        .episode h3 {{
+        .podcast-image {{
+            width: 150px;
+            height: 150px;
+            border-radius: 12px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            object-fit: cover;
+        }}
+        .header-text {{
+            flex: 1;
+        }}
+        .header h1 {{
+            margin: 0 0 10px 0;
+            font-size: 2.5em;
+        }}
+        .header p {{
+            margin: 0;
+            opacity: 0.95;
+            font-size: 1.1em;
+        }}
+        .subscribe-box {{
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }}
+        .subscribe-box h2 {{
             margin-top: 0;
+            color: {primary_color};
         }}
-        .description {{
-            white-space: pre-wrap;
-            margin: 15px 0;
+        .subscribe-box a {{
+            color: {primary_color};
+            text-decoration: none;
+            font-weight: 600;
         }}
-        .chapters {{
-            background-color: #f5f5f5;
-            padding: 15px;
-            margin: 15px 0;
-            border-radius: 5px;
+        .subscribe-box a:hover {{
+            text-decoration: underline;
         }}
-        .chapters h4 {{
-            margin-top: 0;
+        .episodes-header {{
+            margin-bottom: 20px;
         }}
-        .chapters-list {{
-            white-space: pre-wrap;
-            font-family: monospace;
-            font-size: 0.9em;
+        .episodes-header h2 {{
+            color: {primary_color};
+        }}
+        .episode-card {{
+            background-color: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            transition: box-shadow 0.3s ease;
+        }}
+        .episode-card:hover {{
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+        }}
+        .episode-card h3 {{
+            margin: 0 0 12px 0;
+            color: #202124;
+            font-size: 1.5em;
         }}
         .metadata {{
-            color: #666;
+            color: #5f6368;
             font-size: 0.9em;
+            margin-bottom: 16px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #e8eaed;
+        }}
+        .metadata a {{
+            color: {secondary_color};
+            text-decoration: none;
+        }}
+        .metadata a:hover {{
+            text-decoration: underline;
+        }}
+        .audio-player-container {{
+            background: linear-gradient(135deg, {primary_color}15, {secondary_color}15);
+            border-radius: 8px;
+            padding: 20px;
+            margin: 16px 0;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            border: 2px solid {primary_color}30;
+        }}
+        .episode-thumbnail {{
+            width: 120px;
+            height: 120px;
+            border-radius: 8px;
+            object-fit: cover;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+            flex-shrink: 0;
+        }}
+        .audio-player {{
+            flex: 1;
         }}
         audio {{
             width: 100%;
-            margin: 15px 0;
+            border-radius: 4px;
+        }}
+        .description {{
+            white-space: pre-wrap;
+            margin: 16px 0;
+            color: #3c4043;
+            line-height: 1.7;
+        }}
+        .chapters {{
+            background-color: #f8f9fa;
+            padding: 16px;
+            margin: 16px 0;
+            border-radius: 8px;
+            border-left: 4px solid {secondary_color};
+        }}
+        .chapters h4 {{
+            margin: 0 0 12px 0;
+            color: {primary_color};
+            font-size: 1.1em;
+        }}
+        .chapters-list {{
+            white-space: pre-wrap;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #3c4043;
+            line-height: 1.8;
         }}
     </style>
 </head>
 <body>
-    <h1>{podcast_info.get('title', 'My Podcast')}</h1>
-    <p>{podcast_info.get('description', 'A podcast feed')}</p>
+    <div class="header">
+        <div class="header-content">
+"""
 
-    <h2>Subscribe</h2>
-    <p>RSS Feed: <a href="/feed.xml">/feed.xml</a></p>
+    if podcast_image:
+        html += f"""            <img src="{podcast_image}" alt="Podcast Cover" class="podcast-image">
+"""
 
-    <h2>Episodes</h2>
+    html += f"""            <div class="header-text">
+                <h1>{podcast_info.get('title', 'My Podcast')}</h1>
+                <p>{podcast_info.get('description', 'A podcast feed')}</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="subscribe-box">
+        <h2>Subscribe</h2>
+        <p>RSS Feed: <a href="/feed.xml">/feed.xml</a></p>
+    </div>
+
+    <div class="episodes-header">
+        <h2>Episodes</h2>
+    </div>
 """
 
     for episode in sorted_episodes:
@@ -384,8 +510,14 @@ def generate_html_page(episodes, podcast_info):
         pub_date = meta.get('pub_date', '')
         webpage_url = meta.get('webpage_url', '')
         chapters = meta.get('chapters', [])
+        thumbnail = meta.get('thumbnail', '')
 
-        html += f"""    <div class="episode">
+        # Check if we have a local thumbnail file
+        thumbnail_filename = None
+        if 'thumbnail_file' in meta:
+            thumbnail_filename = meta['thumbnail_file'].name
+
+        html += f"""    <div class="episode-card">
         <h3>{title}</h3>
         <div class="metadata">
             <strong>Published:</strong> {pub_date}
@@ -397,10 +529,24 @@ def generate_html_page(episodes, podcast_info):
 
         html += """        </div>
 
-        <audio controls>
-            <source src="/episodes/{}" type="audio/mpeg">
-            Your browser does not support the audio element.
-        </audio>
+        <div class="audio-player-container">
+"""
+
+        # Add thumbnail if available
+        if thumbnail_filename:
+            html += f"""            <img src="/episodes/{thumbnail_filename}" alt="Episode thumbnail" class="episode-thumbnail">
+"""
+        elif thumbnail:
+            html += f"""            <img src="{thumbnail}" alt="Episode thumbnail" class="episode-thumbnail">
+"""
+
+        html += """            <div class="audio-player">
+                <audio controls>
+                    <source src="/episodes/{}" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+        </div>
 """.format(episode['mp3_filename'])
 
         if description:
@@ -449,12 +595,16 @@ def main():
         'author': os.getenv('PODCAST_AUTHOR', 'Podcast Author'),
         'language': os.getenv('PODCAST_LANGUAGE', 'en-us'),
         'explicit': os.getenv('PODCAST_EXPLICIT', 'no'),
+        'primary_color': os.getenv('PRIMARY_COLOR', '#1a73e8'),
+        'secondary_color': os.getenv('SECONDARY_COLOR', '#34a853'),
     }
 
     logger.debug(f"Podcast metadata:")
     logger.debug(f"  Title: {podcast_info['title']}")
     logger.debug(f"  Author: {podcast_info['author']}")
     logger.debug(f"  Language: {podcast_info['language']}")
+    logger.debug(f"  Primary color: {podcast_info['primary_color']}")
+    logger.debug(f"  Secondary color: {podcast_info['secondary_color']}")
 
     # Optional image URL
     if os.getenv('PODCAST_IMAGE_URL'):
